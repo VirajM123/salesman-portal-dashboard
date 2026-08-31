@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Local environment values and API keys
+.env
+.env.local
+.env.*.local
+
+# Local API process logs
+server-output.log
+server-error.log
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
