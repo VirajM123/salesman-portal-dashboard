@@ -23,7 +23,8 @@ const mongoDnsServers = String(process.env.MONGODB_DNS_SERVERS || "")
 if (mongoDnsServers.length) dns.setServers(mongoDnsServers);
 
 const app = express();
-const port = Number(process.env.SERVER_PORT || 4000);
+const port = Number(process.env.PORT || process.env.SERVER_PORT || 4000);
+//const port = Number(process.env.SERVER_PORT || 4000);
 const cookieName = "totalapp_session";
 const mongo = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 15000 });
 let databasePromise;
@@ -257,6 +258,41 @@ function validCoordinate(value, minimum, maximum) {
   return Number.isFinite(number) && number >= minimum && number <= maximum;
 }
 
+function documentValue(document, aliases) {
+  const field = firstMatchingField(document || {}, aliases);
+  return field ? document[field] : undefined;
+}
+
+function deliveryAssignment(delivery) {
+  const embedded = delivery?.assignedSalesman && typeof delivery.assignedSalesman === "object"
+    ? delivery.assignedSalesman
+    : {};
+  const id = embedded.id ?? embedded.salesmanId ?? documentValue(delivery, ["salesmanid", "assignedsalesmanid"]);
+  const name = embedded.name ?? embedded.salesmanName ?? documentValue(delivery, ["salesmanname", "assignedsalesmanname"]);
+  if (id == null && !name) return null;
+  return {
+    id: id == null ? "" : String(id),
+    name: String(name || "Assigned salesman"),
+    assignedAt: serialize(embedded.assignedAt ?? delivery.assignedAt ?? null)
+  };
+}
+
+function normalizeAssignedSalesman(record, assignment) {
+  if (!assignment) return null;
+  if (!record) return assignment;
+  const latitude = Number.parseFloat(String(documentValue(record, ["geolatitude", "currentlatitude", "latitude", "lat"]) ?? ""));
+  const longitude = Number.parseFloat(String(documentValue(record, ["geolongitude", "currentlongitude", "longitude", "lng", "lon"]) ?? ""));
+  const hasLocation = validCoordinate(latitude, -90, 90) && validCoordinate(longitude, -180, 180);
+  return {
+    ...assignment,
+    name: String(documentValue(record, ["salesmanname", "fullname", "name", "username"]) || assignment.name),
+    phone: String(documentValue(record, ["mobile", "mobileno", "phone", "phoneno"]) || ""),
+    pos: hasLocation ? { lat: latitude, lng: longitude } : null,
+    speed: Number(documentValue(record, ["speed", "currentspeed"]) || 0),
+    battery: Number(documentValue(record, ["battery", "batterylevel"]) || 0)
+  };
+}
+
 function normalizeDelivery(delivery) {
   const bills = Array.isArray(delivery.bills) ? delivery.bills : [];
   const normalizedBills = bills.map((bill, index) => {
@@ -288,6 +324,7 @@ function normalizeDelivery(delivery) {
     pendingBills: Math.max(0, normalizedBills.length - deliveredBills),
     mappedBills,
     totalAmount: normalizedBills.reduce((sum, bill) => sum + (Number.isFinite(bill.billAmount) ? bill.billAmount : 0), 0),
+    assignedSalesman: deliveryAssignment(delivery),
     bills: normalizedBills
   };
 }
@@ -355,7 +392,16 @@ app.get("/api/deliveries", requireAuth, async (req, res, next) => {
       collection.aggregate([
         { $match: distributorQuery },
         { $project: { totalBills: billCountExpression, deliveredBills: deliveredExpression, mappedBills: mappedExpression } },
-        { $group: { _id: null, totalLoads: { $sum: 1 }, totalBills: { $sum: "$totalBills" }, deliveredBills: { $sum: "$deliveredBills" }, mappedBills: { $sum: "$mappedBills" } } }
+        { $group: {
+          _id: null,
+          totalLoads: { $sum: 1 },
+          completedLoads: { $sum: { $cond: [{ $and: [{ $gt: ["$totalBills", 0] }, { $eq: ["$deliveredBills", "$totalBills"] }] }, 1, 0] } },
+          inProgressLoads: { $sum: { $cond: [{ $and: [{ $gt: ["$deliveredBills", 0] }, { $lt: ["$deliveredBills", "$totalBills"] }] }, 1, 0] } },
+          pendingLoads: { $sum: { $cond: [{ $eq: ["$deliveredBills", 0] }, 1, 0] } },
+          totalBills: { $sum: "$totalBills" },
+          deliveredBills: { $sum: "$deliveredBills" },
+          mappedBills: { $sum: "$mappedBills" }
+        } }
       ]).toArray(),
       collection.distinct("LoadSeries", distributorQuery)
     ]);
@@ -370,8 +416,53 @@ app.get("/api/deliveries", requireAuth, async (req, res, next) => {
       total,
       totalPages,
       series: seriesValues.map(value => String(value ?? "")).sort(),
-      summary: { totalLoads: totals.totalLoads, totalBills: totals.totalBills, deliveredBills: totals.deliveredBills, pendingBills: Math.max(0, totals.totalBills - totals.deliveredBills), mappedBills: totals.mappedBills }
+      summary: {
+        totalLoads: totals.totalLoads,
+        completedLoads: totals.completedLoads || 0,
+        inProgressLoads: totals.inProgressLoads || 0,
+        pendingLoads: totals.pendingLoads || 0,
+        totalBills: totals.totalBills,
+        deliveredBills: totals.deliveredBills,
+        pendingBills: Math.max(0, totals.totalBills - totals.deliveredBills),
+        mappedBills: totals.mappedBills
+      }
     });
+  } catch (error) { next(error); }
+});
+
+app.patch("/api/deliveries/:id/assignment", requireAuth, async (req, res, next) => {
+  try {
+    const deliveryId = String(req.params.id || "");
+    const salesmanId = String(req.body?.salesmanId || "").trim();
+    if (!ObjectId.isValid(deliveryId)) return res.status(400).json({ error: "Invalid load ID." });
+    if (!ObjectId.isValid(salesmanId)) return res.status(400).json({ error: "Select a valid salesman." });
+
+    const [deliveries, salesmen] = await Promise.all([getCollection("Mas_Delivery"), getCollection("mas_salesman")]);
+    const [deliverySample, salesmanSample] = await Promise.all([deliveries.findOne({}), salesmen.findOne({})]);
+    const deliveryDistributorFields = matchingFields(deliverySample, distributorAliases);
+    const salesmanDistributorFields = matchingFields(salesmanSample, distributorAliases);
+    if (!deliveryDistributorFields.length || !salesmanDistributorFields.length) {
+      return res.status(503).json({ error: "Distributor fields are not available for load assignment." });
+    }
+    const distributorValues = scopeValues(String(req.session.distributorId));
+    const salesman = await salesmen.findOne({
+      $and: [
+        { _id: new ObjectId(salesmanId) },
+        { $or: salesmanDistributorFields.flatMap(field => distributorValues.map(value => ({ [field]: value }))) }
+      ]
+    });
+    if (!salesman) return res.status(404).json({ error: "That salesman is not available for this distributor." });
+
+    const name = String(documentValue(salesman, ["salesmanname", "fullname", "name", "username"]) || "Salesman");
+    const assignedSalesman = { id: salesmanId, name, assignedAt: new Date() };
+    const result = await deliveries.updateOne({
+      $and: [
+        { _id: new ObjectId(deliveryId) },
+        { $or: deliveryDistributorFields.flatMap(field => distributorValues.map(value => ({ [field]: value }))) }
+      ]
+    }, { $set: { assignedSalesman } });
+    if (!result.matchedCount) return res.status(404).json({ error: "Load not found for this distributor." });
+    res.json({ assignedSalesman: normalizeAssignedSalesman(salesman, deliveryAssignment({ assignedSalesman })) });
   } catch (error) { next(error); }
 });
 
@@ -416,6 +507,25 @@ app.get("/api/deliveries/track", requireAuth, async (req, res, next) => {
       };
     });
     const mappedStops = stops.filter(stop => stop.lat != null && stop.lng != null);
+    const deliveredBills = stops.filter(stop => /^(delivered|complete|completed|success)$/i.test(stop.status)).length;
+    const assignment = deliveryAssignment(delivery);
+    let assignedSalesman = assignment;
+    if (assignment?.id && ObjectId.isValid(assignment.id)) {
+      try {
+        const salesmen = await getCollection("mas_salesman");
+        const salesmanSample = await salesmen.findOne({});
+        const salesmanDistributorFields = matchingFields(salesmanSample, distributorAliases);
+        const salesman = salesmanDistributorFields.length ? await salesmen.findOne({
+          $and: [
+            { _id: new ObjectId(assignment.id) },
+            { $or: salesmanDistributorFields.flatMap(field => scopeValues(String(req.session.distributorId)).map(value => ({ [field]: value }))) }
+          ]
+        }) : null;
+        assignedSalesman = normalizeAssignedSalesman(salesman, assignment);
+      } catch {
+        assignedSalesman = assignment;
+      }
+    }
     res.json({
       load: {
         id: String(delivery._id),
@@ -423,7 +533,10 @@ app.get("/api/deliveries/track", requireAuth, async (req, res, next) => {
         loadNo: delivery.LoadNo,
         uploadedAt: serialize(delivery.uploadedAt),
         totalBills: bills.length,
+        deliveredBills,
+        pendingBills: Math.max(0,bills.length-deliveredBills),
         mappedBills: mappedStops.length,
+        assignedSalesman,
         stops: mappedStops
       }
     });

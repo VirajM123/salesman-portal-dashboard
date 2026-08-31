@@ -19,69 +19,51 @@ import {
 const center = { lat: 18.5204, lng: 73.8567 };
 const mapLibraries = ["geometry"];
 
-const salesmanSeed = [
-  { id: 101, name: "Rahul Patil", load: "#1848", route: "Pune East", done: 18, total: 26, speed: 28, battery: 72, status: "In Progress", color: "#6842ee", pos: {lat:18.5638,lng:73.9237} },
-  { id: 102, name: "Sachin More", load: "#1847", route: "Pune West", done: 15, total: 24, speed: 32, battery: 64, status: "In Progress", color: "#2777e8", pos: {lat:18.568,lng:73.777} },
-  { id: 103, name: "Amit Shinde", load: "#1846", route: "Hadapsar", done: 12, total: 20, speed: 25, battery: 81, status: "In Progress", color: "#7650e8", pos: {lat:18.564,lng:73.965} },
-  { id: 104, name: "Vikas Jadhav", load: "#1845", route: "Kothrud", done: 22, total: 22, speed: 0, battery: 93, status: "Delivered", color: "#20a862", pos: {lat:18.507,lng:73.798} },
-  { id: 105, name: "Sagar Pawar", load: "#1844", route: "Baner", done: 18, total: 18, speed: 0, battery: 87, status: "Delivered", color: "#20a862", pos: {lat:18.510,lng:73.928} }
-];
+const emptyDeliverySummary = {totalLoads:0,completedLoads:0,inProgressLoads:0,pendingLoads:0,totalBills:0,deliveredBills:0,pendingBills:0,mappedBills:0};
 
-const routes = {
-  101: [
-    {lat:18.505,lng:73.805},{lat:18.515,lng:73.825},{lat:18.526,lng:73.842},
-    {lat:18.536,lng:73.861},{lat:18.548,lng:73.884},{lat:18.558,lng:73.907},
-    {lat:18.564,lng:73.924},{lat:18.572,lng:73.944}
-  ],
-  102: [
-    {lat:18.594,lng:73.744},{lat:18.585,lng:73.763},{lat:18.573,lng:73.784},
-    {lat:18.560,lng:73.803},{lat:18.548,lng:73.824},{lat:18.532,lng:73.842}
-  ],
-  103: [
-    {lat:18.522,lng:73.842},{lat:18.535,lng:73.862},{lat:18.549,lng:73.884},
-    {lat:18.561,lng:73.909},{lat:18.572,lng:73.937},{lat:18.564,lng:73.965}
-  ],
-  105: [
-    {lat:18.497,lng:73.900},{lat:18.500,lng:73.916},{lat:18.505,lng:73.932},
-    {lat:18.510,lng:73.948}
-  ]
-};
+function normalizedKey(value="") {
+  return String(value).toLowerCase().replace(/[^a-z0-9]/g,"");
+}
 
-const loads = [
-  ["#1848","Rahul Patil","Pune East",26,18,8,69,"In Progress","10 sec ago"],
-  ["#1847","Sachin More","Pune West",24,15,9,63,"In Progress","15 sec ago"],
-  ["#1846","Amit Shinde","Hadapsar",20,12,8,60,"In Progress","8 sec ago"],
-  ["#1845","Vikas Jadhav","Kothrud",22,22,0,100,"Delivered","2 min ago"],
-  ["#1844","Sagar Pawar","Baner",18,18,0,100,"Delivered","1 min ago"],
-  ["#1843","Swapnil Kadam","Hinjewadi",16,0,16,0,"Pending","—"],
-  ["#1842","Nilesh Gaikwad","Pimpri",15,0,15,0,"Pending","—"],
-  ["#1841","Mahesh Rokade","Deccan",21,9,12,43,"In Progress","20 sec ago"]
-];
+function recordValue(record, aliases) {
+  const keys = Object.keys(record || {});
+  for (const alias of aliases) {
+    const key = keys.find(candidate=>normalizedKey(candidate)===alias);
+    if (key && record[key] != null && record[key] !== "") return record[key];
+  }
+  return undefined;
+}
 
-const completed = [
-  ["Vikas Jadhav","#1845 • Kothrud Route","22 Outlets","11:45 AM"],
-  ["Sagar Pawar","#1844 • Baner Route","18 Outlets","10:30 AM"],
-  ["Rohit Salve","#1840 • Pune East","25 Outlets","09:15 AM"],
-  ["Pravin Shelar","#1839 • Hadapsar Route","20 Outlets","08:40 AM"],
-  ["Ajay Kale","#1838 • Pune West Route","24 Outlets","08:05 AM"]
-];
+function normalizeSalesman(record, index=0) {
+  const latitude = Number.parseFloat(String(recordValue(record,["geolatitude","currentlatitude","latitude","lat"])??""));
+  const longitude = Number.parseFloat(String(recordValue(record,["geolongitude","currentlongitude","longitude","lng","lon"])??""));
+  const hasLocation = Number.isFinite(latitude)&&latitude>=-90&&latitude<=90&&Number.isFinite(longitude)&&longitude>=-180&&longitude<=180;
+  return {
+    id:String(record?._id ?? recordValue(record,["salesmanid","userid","id"]) ?? index),
+    name:String(recordValue(record,["salesmanname","fullname","name","username"]) || `Salesman ${index+1}`),
+    route:String(recordValue(record,["route","routename","area"]) || "Assigned route"),
+    pos:hasLocation?{lat:latitude,lng:longitude}:null,
+    speed:Number(recordValue(record,["speed","currentspeed"])||0),
+    battery:Number(recordValue(record,["battery","batterylevel"])||0),
+    color:["#6842ee","#2777e8","#7650e8","#20a862","#f59e0b"][index%5]
+  };
+}
 
-const performance = [
-  {day:"18 May", delivered:35, progress:58},
-  {day:"19 May", delivered:22, progress:45},
-  {day:"20 May", delivered:42, progress:64},
-  {day:"21 May", delivered:18, progress:41},
-  {day:"22 May", delivered:44, progress:66},
-  {day:"23 May", delivered:24, progress:47},
-  {day:"24 May", delivered:37, progress:61}
-];
+function deliveryStatus(load) {
+  if (load.totalBills>0 && load.deliveredBills===load.totalBills) return "Delivered";
+  if (load.deliveredBills>0) return "In Progress";
+  return "Pending";
+}
 
-const pie = [
-  {name:"Delivered", value:28, color:"#20a862"},
-  {name:"In Progress", value:32, color:"#2777e8"},
-  {name:"Pending", value:16, color:"#f59e0b"},
-  {name:"Failed", value:2, color:"#ef4444"}
-];
+function deliveryLabel(load) {
+  return [load.loadSeries,load.loadNo].filter(value=>value!==""&&value!=null).join(" ") || String(load.id);
+}
+
+function deliveryRow(load) {
+  const progress = loadProgress(load);
+  const updated = loadDate(load.uploadedAt);
+  return [deliveryLabel(load),load.assignedSalesman?.name||"Unassigned",load.loadSeries||"—",load.totalBills,load.deliveredBills,load.pendingBills,progress,deliveryStatus(load),updated.time||updated.date,load];
+}
 
 const nav = [
   ["Dashboard", BarChart3], ["Live Tracking", LocateFixed], ["Loads", Package],
@@ -160,6 +142,7 @@ function KPI({icon:Icon, label, value, change, desc, tone="purple", down=false, 
 }
 
 function SalesmanCard({person, onClick, fallback=false}) {
+  const progress = person.total ? Math.round(person.done/person.total*100) : 0;
   return (
       <button className={`salesman-marker ${fallback ? "fallback" : ""}`} style={{"--marker":person.color}} onClick={onClick} aria-label={`Open ${person.name} tracking details`}>
         <div className="marker-head">
@@ -171,7 +154,7 @@ function SalesmanCard({person, onClick, fallback=false}) {
         </div>
         <div className="marker-foot">
           <span className="vehicle-icon"><Truck size={15}/></span>
-          <span>{person.done}/{person.total} ({Math.round(person.done/person.total*100)}%)</span>
+          <span>{person.done}/{person.total} ({progress}%)</span>
           <b>{person.speed} km/h</b>
         </div>
       </button>
@@ -186,11 +169,22 @@ function SalesmanOverlay({person, onClick}) {
   );
 }
 
-function MapPanel({salesmen, setSelected, showRoutes, traffic, layerState, trackedLoad, onMapLoad, onMapUnmount}) {
+function MapPanel({salesmen, setSelected, showRoutes, traffic, layerState, trackedLoad, deliveryRoutes=[], onMapLoad, onMapUnmount}) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const [mapLoadError, setMapLoadError] = useState(false);
   const trackedStops = trackedLoad?.stops || [];
   const routeStops = useMemo(()=>orderDeliveryStops(trackedStops), [trackedLoad]);
+  const trackedSalesman = trackedLoad?.assignedSalesman?.pos ? {
+    ...trackedLoad.assignedSalesman,
+    load:deliveryLabel(trackedLoad),
+    route:trackedLoad.loadSeries||"Tracked load",
+    done:trackedLoad.deliveredBills||0,
+    total:trackedLoad.totalBills,
+    mapped:trackedLoad.mappedBills,
+    lastUpdate:loadDate(trackedLoad.uploadedAt).time||loadDate(trackedLoad.uploadedAt).date,
+    status:deliveryStatus(trackedLoad),
+    color:"#6842ee"
+  } : null;
   if (typeof window !== "undefined") window.gm_authFailure = () => setMapLoadError(true);
   useEffect(()=>()=>{
     if (typeof window !== "undefined") window.gm_authFailure = undefined;
@@ -213,7 +207,7 @@ function MapPanel({salesmen, setSelected, showRoutes, traffic, layerState, track
       {showRoutes && <svg className="fallback-routes" viewBox="0 0 1000 320" preserveAspectRatio="none">
         {salesmen.slice(0,4).map((person,index)=><path key={person.id} d={["M155 95 C280 100 305 220 470 205 S620 115 755 120","M235 245 C330 230 370 150 520 150 S680 235 805 215","M335 65 C420 95 490 105 570 80 S720 58 845 100","M130 210 C250 170 360 265 485 250 S650 180 760 260"][index]} fill="none" stroke={person.color} strokeWidth="3" strokeLinecap="round" strokeDasharray="7 4"/>) }
       </svg>}
-      {layerState.salesmen && salesmen.map(p => <div key={p.id} className="fake-map-marker" style={{left:`${25+(p.id%5)*13}%`,top:`${35+(p.id%4)*10}%`}}>
+      {layerState.salesmen && (trackedSalesman?[trackedSalesman]:salesmen).map((p,index) => <div key={p.id} className="fake-map-marker" style={{left:`${25+(index%5)*13}%`,top:`${35+(index%4)*10}%`}}>
         <SalesmanCard fallback person={p} onClick={()=>setSelected(p)}/>
       </div>)}
       <div className="map-key-note"><MapIcon size={15}/> {mapLoadError ? <>Google Maps rejected this key. Enable Maps JavaScript API, billing, and allow <b>localhost:5173</b>.</> : <>Live map unavailable — add <b>VITE_GOOGLE_MAPS_API_KEY</b>.</>}</div>
@@ -222,15 +216,15 @@ function MapPanel({salesmen, setSelected, showRoutes, traffic, layerState, track
 
   return <LoadScript googleMapsApiKey={apiKey} libraries={mapLibraries} authReferrerPolicy="origin" onError={()=>setMapLoadError(true)}>
     <GoogleMap mapContainerClassName="real-map" center={routeStops[0] || center} zoom={routeStops.length ? 14 : 12} options={options} onLoad={onMapLoad} onUnmount={onMapUnmount}>
-      {!trackedStops.length && showRoutes && Object.entries(routes).map(([id,path]) =>
-        <Polyline key={id} path={path} options={{strokeColor:salesmen.find(x=>x.id===+id)?.color || "#6842ee", strokeOpacity:.9, strokeWeight:4}}/>
+      {!trackedStops.length && showRoutes && deliveryRoutes.map(load=>({load,path:orderDeliveryStops((load.bills||[]).filter(bill=>bill.hasLocation))})).filter(item=>item.path.length>1).map(({load,path}) =>
+        <Polyline key={load.id} path={path} options={{strokeColor:salesmen.find(person=>person.id===String(load.assignedSalesman?.id))?.color || "#6842ee", strokeOpacity:.9, strokeWeight:4}}/>
       )}
       {showRoutes && routeStops.length > 1 && <Polyline path={routeStops} options={{strokeColor:"#4338e8",strokeOpacity:1,strokeWeight:5,zIndex:20}}/>}
       {layerState.stops && routeStops.map((stop,index) => index === 0
         ? <Marker key={`delivery-${stop.sequence}`} position={{lat:stop.lat,lng:stop.lng}} title={`Start: ${stop.customerName}`} icon={{path:0,scale:14,fillColor:"#13b47b",fillOpacity:1,strokeColor:"#fff",strokeWeight:3}} label={{text:"▶",color:"#fff",fontSize:"11px"}} zIndex={31}/>
         : <Marker key={`delivery-${stop.sequence}`} position={{lat:stop.lat,lng:stop.lng}} title={`${index}. ${stop.customerName}`} label={{text:String(index),color:"#fff",fontSize:"10px",fontWeight:"700"}} zIndex={30}/>) }
       {traffic && <TrafficLayer/>}
-      {!trackedStops.length && layerState.salesmen && salesmen.map(p => <SalesmanOverlay key={p.id} person={p} onClick={()=>setSelected(p)}/>)}
+      {layerState.salesmen && (trackedSalesman?[trackedSalesman]:(!trackedStops.length?salesmen:[])).map(p => <SalesmanOverlay key={p.id} person={p} onClick={()=>setSelected(p)}/>)}
       {!trackedStops.length && salesmen.map(p => <Marker key={`m-${p.id}`} position={p.pos} icon={{path:2,scale:0}}/> )}
     </GoogleMap>
   </LoadScript>
@@ -239,7 +233,9 @@ function MapPanel({salesmen, setSelected, showRoutes, traffic, layerState, track
 function LoadDrawer({row, onClose, onTrack}) {
   if (!row) return null;
   const [id,name,route,total,done,pending,progress,status] = row;
-  const outlets = ["ABC Stores","XYZ Traders","Om General Store","Ganesh Mart","Shree Enterprises","Sai Distributors"];
+  const load = row[9];
+  const bills = load?.bills||[];
+  const created = loadDate(load?.uploadedAt);
   return <div className="drawer-backdrop" onClick={onClose}>
     <aside className="drawer" onClick={e=>e.stopPropagation()}>
       <div className="drawer-head">
@@ -255,18 +251,19 @@ function LoadDrawer({row, onClose, onTrack}) {
       </div>
       <div className="progress-large"><span style={{width:`${progress}%`}}/></div>
       <div className="drawer-section"><h3>Delivery Sequence</h3>
-        {outlets.map((o,i)=><div className="sequence-row" key={o}>
-          <span className={`seq ${i<3 ? "done":""}`}>{i+1}</span><div><b>{o}</b><small>{i<3 ? "Delivered • 10:2"+i+" AM":"Pending"}</small></div>
-          <StatusPill status={i<3 ? "Delivered":"Pending"}/>
-        </div>)}
+        {bills.map((bill,index)=>{const delivered=/^(delivered|complete|completed|success)$/i.test(bill.status);return <div className="sequence-row" key={`${bill.sequence}-${bill.trnSeries}-${bill.trnNo}`}>
+          <span className={`seq ${delivered?"done":""}`}>{index+1}</span><div><b>{bill.customerName}</b><small>{bill.trnSeries} {bill.trnNo||""}{bill.hasLocation?" · Location mapped":" · No location"}</small></div>
+          <StatusPill status={delivered?"Delivered":"Pending"}/>
+        </div>})}
+        {!bills.length&&<div className="empty-table">No bills are attached to this load.</div>}
       </div>
       <div className="drawer-section">
         <h3>Load Activity</h3>
-        <div className="activity-line"><span/>Load started <b>09:05 AM</b></div>
-        <div className="activity-line"><span/>Last GPS update <b>10 sec ago</b></div>
-        <div className="activity-line"><span/>ETA <b>12:45 PM</b></div>
+        <div className="activity-line"><span/>Uploaded <b>{created.date} {created.time}</b></div>
+        <div className="activity-line"><span/>Mapped locations <b>{load?.mappedBills||0}/{total}</b></div>
+        <div className="activity-line"><span/>Assigned salesman <b>{load?.assignedSalesman?.name||"Unassigned"}</b></div>
       </div>
-      <button className="primary-btn" onClick={()=>onTrack?.(id)}><Navigation size={16}/> Track Salesman</button>
+      <button className="primary-btn" onClick={()=>onTrack?.(row)}><Navigation size={16}/> Track Assigned Salesman</button>
     </aside>
   </div>
 }
@@ -579,7 +576,7 @@ function LoadDirectory({user, onUnauthorized, onTrack}) {
     <div className="loads-table-card">
       <div className="loads-table-head"><div><h3>All Loads</h3><span>{total.toLocaleString()} matching records</span></div><label>Rows <select value={pageSize} onChange={event=>{setPageSize(Number(event.target.value));setPage(1)}}><option>20</option><option>50</option><option>100</option></select></label></div>
       <div className="loads-table-scroll" ref={tableRef}>
-        {loading?<div className="loads-state"><RefreshCw className="spin" size={24}/><b>Loading your loads…</b><span>Reading distributor records from Mas_Delivery</span></div>:error?<div className="loads-state error"><AlertTriangle size={24}/><b>{error}</b><button onClick={()=>setRefreshKey(value=>value+1)}>Retry</button></div>:!records.length?<div className="loads-state"><Package size={27}/><b>No loads match these filters.</b><button onClick={clearFilters}>Clear all filters</button></div>:<table className="loads-data-table"><thead><tr><th>Load</th><th>Uploaded</th><th>Bill progress</th><th>Location health</th><th>Load value</th><th>Status</th><th>Actions</th></tr></thead><tbody>{records.map(load=>{const progressValue=loadProgress(load);const dateValue=loadDate(load.uploadedAt);const mappingValue=load.totalBills?Math.round(load.mappedBills/load.totalBills*100):0;const status=progressValue===100?"Completed":progressValue>0?"In progress":"Not started";return <tr key={load.id}><td><div className="load-id-cell"><span><Package size={15}/></span><div><b>{load.loadSeries||"(blank)"} {load.loadNo}</b><small>{load.totalBills} bills attached</small></div></div></td><td><div className="load-date"><b>{dateValue.date}</b><small>{dateValue.time}</small></div></td><td><div className="load-progress"><div><b>{load.deliveredBills}/{load.totalBills}</b><span>{progressValue}%</span></div><i><em style={{width:`${progressValue}%`}}/></i><small>{load.pendingBills} pending</small></div></td><td><div className="load-location"><span className={mappingValue===100?"good":mappingValue?"partial":"empty"}><MapPin size={13}/>{load.mappedBills}/{load.totalBills}</span><small>{mappingValue}% coverage</small></div></td><td><b className="load-amount">₹{Number(load.totalAmount||0).toLocaleString("en-IN",{maximumFractionDigits:2})}</b></td><td><span className={`load-status ${status.toLowerCase().replace(/\s/g,"-")}`}><i/>{status}</span></td><td><div className="load-actions"><button onClick={()=>setSelectedLoad(load)} title="View all bills" aria-label={`View load ${load.loadNo}`}><Eye size={15}/></button><button className="track" disabled={!load.mappedBills} onClick={()=>onTrack(load)} title={load.mappedBills?"Track on map":"No mapped locations"} aria-label={`Track load ${load.loadNo}`}><Navigation size={15}/></button></div></td></tr>})}</tbody></table>}
+        {loading?<div className="loads-state"><RefreshCw className="spin" size={24}/><b>Loading your loads…</b><span>Reading distributor records from Mas_Delivery</span></div>:error?<div className="loads-state error"><AlertTriangle size={24}/><b>{error}</b><button onClick={()=>setRefreshKey(value=>value+1)}>Retry</button></div>:!records.length?<div className="loads-state"><Package size={27}/><b>No loads match these filters.</b><button onClick={clearFilters}>Clear all filters</button></div>:<table className="loads-data-table"><thead><tr><th>Load</th><th>Uploaded</th><th>Bill progress</th><th>Location health</th><th>Load value</th><th>Status</th><th>Actions</th></tr></thead><tbody>{records.map(load=>{const progressValue=loadProgress(load);const dateValue=loadDate(load.uploadedAt);const mappingValue=load.totalBills?Math.round(load.mappedBills/load.totalBills*100):0;const status=progressValue===100?"Completed":progressValue>0?"In progress":"Not started";return <tr key={load.id}><td><div className="load-id-cell"><span><Package size={15}/></span><div><b>{load.loadSeries||"(blank)"} {load.loadNo}</b><small>{load.totalBills} bills · {load.assignedSalesman?.name||"Unassigned"}</small></div></div></td><td><div className="load-date"><b>{dateValue.date}</b><small>{dateValue.time}</small></div></td><td><div className="load-progress"><div><b>{load.deliveredBills}/{load.totalBills}</b><span>{progressValue}%</span></div><i><em style={{width:`${progressValue}%`}}/></i><small>{load.pendingBills} pending</small></div></td><td><div className="load-location"><span className={mappingValue===100?"good":mappingValue?"partial":"empty"}><MapPin size={13}/>{load.mappedBills}/{load.totalBills}</span><small>{mappingValue}% coverage</small></div></td><td><b className="load-amount">₹{Number(load.totalAmount||0).toLocaleString("en-IN",{maximumFractionDigits:2})}</b></td><td><span className={`load-status ${status.toLowerCase().replace(/\s/g,"-")}`}><i/>{status}</span></td><td><div className="load-actions"><button onClick={()=>setSelectedLoad(load)} title="View all bills" aria-label={`View load ${load.loadNo}`}><Eye size={15}/></button><button className="track" disabled={!load.mappedBills} onClick={()=>onTrack(load)} title={load.mappedBills?"Track on map":"No mapped locations"} aria-label={`Track load ${load.loadNo}`}><Navigation size={15}/></button></div></td></tr>})}</tbody></table>}
       </div>
       <div className="loads-pagination"><span>{total?`Showing ${firstRecord} to ${lastRecord} of ${total.toLocaleString()} loads`:"Showing 0 loads"}</span><div><button disabled={page===1||loading} onClick={()=>setPage(value=>Math.max(1,value-1))}>‹</button>{pageItems.map(item=>typeof item==="string"?<span key={item}>…</span>:<button key={item} className={page===item?"current":""} onClick={()=>setPage(item)} disabled={loading}>{item}</button>)}<button disabled={page===totalPages||loading} onClick={()=>setPage(value=>Math.min(totalPages,value+1))}>›</button></div></div>
     </div>
@@ -600,7 +597,7 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
   const [routeFilter, setRouteFilter] = useState("All Routes");
   const [salesmanFilter, setSalesmanFilter] = useState("All Salesmen");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [date, setDate] = useState("2025-05-24");
+  const [date, setDate] = useState(()=>new Date().toLocaleDateString("en-CA"));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -611,29 +608,69 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
   const [trackingLoading, setTrackingLoading] = useState(false);
   const [trackingError, setTrackingError] = useState("");
   const [routePanelOpen, setRoutePanelOpen] = useState(true);
+  const [dashboardDeliveries, setDashboardDeliveries] = useState([]);
+  const [deliverySummary, setDeliverySummary] = useState(emptyDeliverySummary);
+  const [salesmanRecords, setSalesmanRecords] = useState([]);
+  const [dashboardError, setDashboardError] = useState("");
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
+  const [assignmentSelection, setAssignmentSelection] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [assignmentMessage, setAssignmentMessage] = useState("");
   const pageSize = 5;
 
-  const routeOptions = useMemo(() => [...new Set(loads.map(row=>row[2]))], []);
-  const filteredLoads = useMemo(() => loads.filter(r =>
+  useEffect(()=>{
+    const controller = new AbortController();
+    const loadDashboardData = async () => {
+      setRefreshing(true);
+      setDashboardError("");
+      try {
+        const [deliveryResponse,salesmanResponse] = await Promise.all([
+          fetch("/api/deliveries?page=1&pageSize=100&sort=newest",{credentials:"include",signal:controller.signal}),
+          fetch("/api/salesmen",{credentials:"include",signal:controller.signal})
+        ]);
+        if (deliveryResponse.status===401 || salesmanResponse.status===401) return onUnauthorized();
+        const [deliveryPayload,salesmanPayload] = await Promise.all([deliveryResponse.json().catch(()=>({})),salesmanResponse.json().catch(()=>({}))]);
+        if (!deliveryResponse.ok) throw new Error(deliveryPayload.error||"Unable to load delivery totals.");
+        if (!salesmanResponse.ok) throw new Error(salesmanPayload.error||"Unable to load salesmen.");
+        setDashboardDeliveries(Array.isArray(deliveryPayload.records)?deliveryPayload.records:[]);
+        setDeliverySummary({...emptyDeliverySummary,...(deliveryPayload.summary||{})});
+        setSalesmanRecords(Array.isArray(salesmanPayload.records)?salesmanPayload.records:[]);
+      } catch (requestError) {
+        if (requestError.name!=="AbortError") setDashboardError(requestError.message==="Failed to fetch"?"Unable to reach the application server.":requestError.message);
+      } finally {
+        if (!controller.signal.aborted) setRefreshing(false);
+      }
+    };
+    loadDashboardData();
+    return ()=>controller.abort();
+  },[dataRefreshKey]);
+
+  const availableSalesmen = useMemo(()=>salesmanRecords.map(normalizeSalesman),[salesmanRecords]);
+  const dashboardRows = useMemo(()=>dashboardDeliveries.map(deliveryRow),[dashboardDeliveries]);
+  const routeOptions = useMemo(() => [...new Set(dashboardDeliveries.map(load=>load.loadSeries||"—"))], [dashboardDeliveries]);
+  const filteredLoads = useMemo(() => dashboardRows.filter(r =>
     r.join(" ").toLowerCase().includes(search.toLowerCase()) &&
     (routeFilter === "All Routes" || r[2] === routeFilter) &&
     (statusFilter === "All" || r[7] === statusFilter)
-  ), [search, routeFilter, statusFilter]);
-  const visibleSalesmen = useMemo(() => salesmanSeed.filter(person =>
+  ), [dashboardRows, search, routeFilter, statusFilter]);
+  const assignedSalesmen = useMemo(()=>dashboardDeliveries.flatMap(load=>{
+    if (!load.assignedSalesman) return [];
+    const master = availableSalesmen.find(person=>person.id===String(load.assignedSalesman.id));
+    if (!master?.pos) return [];
+    return [{...master,name:load.assignedSalesman.name||master.name,load:deliveryLabel(load),route:load.loadSeries||"Assigned load",done:load.deliveredBills,total:load.totalBills,mapped:load.mappedBills,lastUpdate:loadDate(load.uploadedAt).time||loadDate(load.uploadedAt).date,status:deliveryStatus(load)}];
+  }),[dashboardDeliveries,availableSalesmen]);
+  const visibleSalesmen = useMemo(() => assignedSalesmen.filter(person =>
     (routeFilter === "All Routes" || person.route === routeFilter) &&
     (salesmanFilter === "All Salesmen" || person.name === salesmanFilter) &&
     (statusFilter === "All" || person.status === statusFilter)
-  ), [routeFilter, salesmanFilter, statusFilter]);
+  ), [assignedSalesmen,routeFilter, salesmanFilter, statusFilter]);
   const totalPages = Math.max(1, Math.ceil(filteredLoads.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedLoads = filteredLoads.slice((currentPage-1)*pageSize, currentPage*pageSize);
   const orderedTrackedStops = useMemo(()=>orderDeliveryStops(trackedLoad?.stops || []), [trackedLoad]);
   const trackedRouteDistance = useMemo(()=>orderedTrackedStops.reduce((total,stop,index)=>index?total+stopDistance(orderedTrackedStops[index-1],stop):total,0),[orderedTrackedStops]);
 
-  const refresh = () => {
-    setRefreshing(true);
-    setTimeout(()=>setRefreshing(false), 700);
-  };
+  const refresh = () => setDataRefreshKey(value=>value+1);
 
   const toggleLayer = key => setLayers(current=>({...current,[key]:!current[key]}));
   const enterFullscreen = () => document.querySelector(".map-wrap")?.requestFullscreen?.();
@@ -679,6 +716,8 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
       const payload = await response.json().catch(()=>({}));
       if (!response.ok) throw new Error(payload.error || "Unable to load tracking details.");
       setTrackedLoad(payload.load);
+      setAssignmentSelection(payload.load.assignedSalesman?.id||"");
+      setAssignmentMessage("");
       setSelected(null);
       setTimeout(()=>fitTrackedLoad(mapRef.current,payload.load),0);
     } catch (requestError) {
@@ -705,12 +744,30 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
     window.scrollTo({top:0,behavior:"smooth"});
     fetchTrackedDelivery(load.loadSeries,load.loadNo);
   };
-  const trackLoad = loadId => {
-    const person = salesmanSeed.find(item=>item.load===loadId);
+  const trackLoad = row => {
+    const load = Array.isArray(row)?row[9]:row;
     setDrawer(null);
-    if (person) selectSalesman(person);
-    setActive("Live Tracking");
-    window.scrollTo({top:0,behavior:"smooth"});
+    if (load?.loadNo!=null) openDatabaseLoad(load);
+  };
+  const assignSalesman = async () => {
+    if (!trackedLoad || !assignmentSelection) return setAssignmentMessage("Select a salesman for this load.");
+    setAssigning(true);
+    setAssignmentMessage("");
+    try {
+      const response = await fetch(`/api/deliveries/${encodeURIComponent(trackedLoad.id)}/assignment`,{
+        method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({salesmanId:assignmentSelection})
+      });
+      if (response.status===401) return onUnauthorized();
+      const payload = await response.json().catch(()=>({}));
+      if (!response.ok) throw new Error(payload.error||"Unable to assign the salesman.");
+      setTrackedLoad(current=>({...current,assignedSalesman:payload.assignedSalesman}));
+      setAssignmentMessage(`${payload.assignedSalesman.name} is assigned to deliver this load.`);
+      setDataRefreshKey(value=>value+1);
+    } catch (requestError) {
+      setAssignmentMessage(requestError.message==="Failed to fetch"?"Unable to reach the application server.":requestError.message);
+    } finally {
+      setAssigning(false);
+    }
   };
   const navTargets = {Dashboard:".topbar","Live Tracking":".tracking-card",Routes:".tracking-card","Delivery Reports":".performance-card",Performance:".performance-card"};
   const availableModules = new Set([...Object.keys(navTargets), "Loads", "Salesmen", "Customers"]);
@@ -734,6 +791,22 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
   const dashboardActive = !directoryActive && !loadsActive && !trackingActive;
   const pageTitle = directoryActive ? active : loadsActive ? "Loads" : trackingActive ? "Live Load Tracking" : "Delivery Tracking Dashboard";
   const pageDescription = directoryActive ? `TotalApp ${active.toLowerCase()} for your distributor account` : loadsActive ? "Complete Mas_Delivery workspace for your distributor account" : trackingActive ? "Find a load by series and number, then view its saved delivery locations" : "Real-time overview of all loads and delivery performance";
+  const loadPercent = value => deliverySummary.totalLoads?`${(value/deliverySummary.totalLoads*100).toFixed(1)}%`:"0%";
+  const completionPercent = deliverySummary.totalBills?`${(deliverySummary.deliveredBills/deliverySummary.totalBills*100).toFixed(1)}%`:"0%";
+  const statusPie = [
+    {name:"Delivered",value:deliverySummary.completedLoads,color:"#20a862"},
+    {name:"In Progress",value:deliverySummary.inProgressLoads,color:"#2777e8"},
+    {name:"Pending",value:deliverySummary.pendingLoads,color:"#f59e0b"}
+  ];
+  const recentlyCompleted = dashboardDeliveries.filter(load=>deliveryStatus(load)==="Delivered").slice(0,5);
+  const actualPerformance = [...new Set(dashboardDeliveries.map(load=>{
+    const parsed=new Date(load.uploadedAt);
+    return Number.isNaN(parsed.getTime())?null:parsed.toISOString().slice(0,10);
+  }).filter(Boolean))].sort().slice(-7).map(dateKey=>{
+    const dayLoads=dashboardDeliveries.filter(load=>String(load.uploadedAt||"").slice(0,10)===dateKey);
+    const parsed=new Date(`${dateKey}T00:00:00`);
+    return {day:parsed.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}),delivered:dayLoads.filter(load=>deliveryStatus(load)==="Delivered").length,progress:dayLoads.filter(load=>deliveryStatus(load)==="In Progress").length};
+  });
 
   return <div className="app-shell">
     {sidebarOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={()=>setSidebarOpen(false)}/>} 
@@ -754,10 +827,10 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
         <button className="admin-card" onClick={onLogout} title="Log out"><Avatar name={user?.name}/><div><b>{user?.name || "Distributor"}</b><span>Distributor Account</span></div><LogOut size={15}/></button>
         <div className="summary-card">
           <h4>TODAY'S SUMMARY</h4>
-          <div><span><Box size={15}/>Total Outlets</span><b>1,248</b></div>
-          <div><span><Check size={15}/>Delivered</span><b className="green">874</b></div>
-          <div><span><Package size={15}/>Pending</span><b className="orange">374</b></div>
-          <div><span><Gauge size={15}/>Success Rate</span><b className="green">70.0%</b></div>
+          <div><span><Box size={15}/>Total Bills</span><b>{deliverySummary.totalBills.toLocaleString()}</b></div>
+          <div><span><Check size={15}/>Delivered</span><b className="green">{deliverySummary.deliveredBills.toLocaleString()}</b></div>
+          <div><span><Package size={15}/>Pending</span><b className="orange">{deliverySummary.pendingBills.toLocaleString()}</b></div>
+          <div><span><Gauge size={15}/>Success Rate</span><b className="green">{completionPercent}</b></div>
         </div>
       </div>
     </aside>
@@ -780,20 +853,21 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
 
       {directoryActive ? <DirectoryPage type={active === "Customers" ? "customers" : "salesmen"} user={user} onUnauthorized={onUnauthorized}/> : loadsActive ? <LoadDirectory user={user} onUnauthorized={onUnauthorized} onTrack={openDatabaseLoad}/> : <>
       {dashboardActive && <section className="kpi-grid">
-        <KPI icon={Box} label="Total Loads" value="48" change="100%" desc="All loads for delivery" tone="purple"/>
-        <KPI icon={Truck} label="In Progress" value="32" change="66.7%" desc="Currently in delivery" tone="blue"/>
-        <KPI icon={Check} label="Delivered" value="28" change="58.3%" desc="Successfully delivered" tone="green"/>
-        <KPI icon={Package} label="Pending" value="16" change="33.3%" desc="Yet to be started" tone="orange" down/>
-        <KPI icon={Route} label="Total Distance" value="1,248 km" desc="All routes today" tone="purple"/>
-        <KPI icon={Clock3} label="Total Time" value="26h 45m" desc="Total delivery time" tone="blue"/>
-        <KPI icon={CircleGauge} label="Avg. Delivery Time" value="32m" desc="Per outlet" tone="pink"/>
+        <KPI icon={Box} label="Total Loads" value={deliverySummary.totalLoads.toLocaleString()} change="100%" desc="All database loads" tone="purple"/>
+        <KPI icon={Truck} label="In Progress" value={deliverySummary.inProgressLoads.toLocaleString()} change={loadPercent(deliverySummary.inProgressLoads)} desc="Partially delivered loads" tone="blue"/>
+        <KPI icon={Check} label="Delivered" value={deliverySummary.completedLoads.toLocaleString()} change={loadPercent(deliverySummary.completedLoads)} desc="Fully delivered loads" tone="green"/>
+        <KPI icon={Package} label="Pending" value={deliverySummary.pendingLoads.toLocaleString()} change={loadPercent(deliverySummary.pendingLoads)} desc="Loads not yet started" tone="orange"/>
+        <KPI icon={FileBarChart} label="Total Bills" value={deliverySummary.totalBills.toLocaleString()} desc="Bills across all loads" tone="purple"/>
+        <KPI icon={Check} label="Delivered Bills" value={deliverySummary.deliveredBills.toLocaleString()} desc="Completed delivery stops" tone="blue"/>
+        <KPI icon={CircleGauge} label="Completion Rate" value={completionPercent} desc="Delivered bills overall" tone="pink"/>
       </section>}
+      {dashboardActive && dashboardError && <div className="tracking-feedback error" role="alert"><AlertTriangle size={15}/>{dashboardError}</div>}
 
       {(dashboardActive || trackingActive) && <section className={`tracking-card ${trackingActive ? "live-tracking-page" : "dashboard-tracking"}`}>
         {dashboardActive && <div className="section-head tracking-head">
           <div><div className="section-title"><h2>Live Tracking</h2><span className="on-route"><i/> {visibleSalesmen.filter(person=>person.status === "In Progress").length} On Route</span></div><p>Real-time location of all salesmen on the field</p></div>
           <div className="map-actions">
-            <label className="native-select"><select value={salesmanFilter} onChange={event=>setSalesmanFilter(event.target.value)} aria-label="Filter by salesman"><option>All Salesmen</option>{salesmanSeed.map(person=><option key={person.id}>{person.name}</option>)}</select><ChevronDown size={14}/></label>
+            <label className="native-select"><select value={salesmanFilter} onChange={event=>setSalesmanFilter(event.target.value)} aria-label="Filter by salesman"><option>All Salesmen</option>{availableSalesmen.map(person=><option key={person.id}>{person.name}</option>)}</select><ChevronDown size={14}/></label>
             <button className={`check-btn ${showRoutes?"checked":""}`} onClick={()=>setShowRoutes(!showRoutes)}><span>{showRoutes && <Check size={12}/>}</span>Show Routes</button>
             <label className="switch-label">Traffic <button className={`switch ${traffic?"on":""}`} onClick={()=>setTraffic(!traffic)}><i/></button></label>
             <button className="icon-btn" onClick={enterFullscreen} aria-label="Open map fullscreen"><Maximize size={17}/></button>
@@ -807,14 +881,20 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
         </form>}
         {trackingActive && trackingError && <div className="tracking-feedback error" role="alert"><AlertTriangle size={15}/>{trackingError}</div>}
         {trackingActive && trackedLoad && <div className={`tracking-feedback ${trackedLoad.mappedBills ? "success" : "warning"}`}>
-          <MapPin size={15}/><b>Load Series: {trackedLoad.loadSeries || "(blank)"}</b><b>Load No: {trackedLoad.loadNo}</b><span>{trackedLoad.mappedBills ? `${trackedLoad.mappedBills} of ${trackedLoad.totalBills} delivery locations mapped` : `Load found with ${trackedLoad.totalBills} bills, but no valid latitude/longitude values are saved.`}</span>
+          <MapPin size={15}/><b>Load Series: {trackedLoad.loadSeries || "(blank)"}</b><b>Load No: {trackedLoad.loadNo}</b><b>Salesman: {trackedLoad.assignedSalesman?.name||"Unassigned"}</b><span>{trackedLoad.mappedBills ? `${trackedLoad.mappedBills} of ${trackedLoad.totalBills} delivery locations mapped` : `Load found with ${trackedLoad.totalBills} bills, but no valid latitude/longitude values are saved.`}</span>
+        </div>}
+        {trackingActive && trackedLoad && <div className="load-assignment">
+          <div><span><UserRound size={17}/></span><div><b>Assign delivery salesman</b><small>The selected name is saved against this load and shown on its map.</small></div></div>
+          <label><select value={assignmentSelection} onChange={event=>{setAssignmentSelection(event.target.value);setAssignmentMessage("")}}><option value="">Select salesman</option>{availableSalesmen.map(person=><option key={person.id} value={person.id}>{person.name}</option>)}</select><ChevronDown size={14}/></label>
+          <button type="button" onClick={assignSalesman} disabled={assigning||!assignmentSelection}>{assigning?<><RefreshCw className="spin" size={14}/>Saving…</>:<><Check size={14}/>Assign to load</>}</button>
+          {assignmentMessage&&<span className="assignment-message">{assignmentMessage}</span>}
         </div>}
 
         <div className={`map-wrap ${trackingActive&&!routePanelOpen?"route-panel-closed":""}`}>
-          <MapPanel salesmen={visibleSalesmen} setSelected={selectSalesman} showRoutes={showRoutes} traffic={traffic} layerState={layers} trackedLoad={trackingActive ? trackedLoad : null} onMapLoad={map=>{mapRef.current=map;if (trackingActive) fitTrackedLoad(map)}} onMapUnmount={()=>{mapRef.current=null}}/>
+          <MapPanel salesmen={visibleSalesmen} setSelected={selectSalesman} showRoutes={showRoutes} traffic={traffic} layerState={layers} trackedLoad={trackingActive ? trackedLoad : null} deliveryRoutes={dashboardDeliveries} onMapLoad={map=>{mapRef.current=map;if (trackingActive) fitTrackedLoad(map)}} onMapUnmount={()=>{mapRef.current=null}}/>
           {trackingActive&&!routePanelOpen&&<button className="route-panel-toggle" onClick={()=>setRoutePanelOpen(true)}><List size={15}/>Show delivery route{trackedLoad&&<span>{trackedLoad.mappedBills}</span>}</button>}
           {trackingActive&&routePanelOpen && <aside className="delivery-route-panel">
-            <div className="delivery-route-head"><div><b>Delivery Route</b><span>{trackedLoad ? `${trackedLoad.mappedBills} stops · ${trackedRouteDistance.toFixed(1)} km total` : "Waiting for load"}</span></div><button onClick={()=>setRoutePanelOpen(false)} aria-label="Hide delivery route"><X size={15}/></button></div>
+            <div className="delivery-route-head"><div><b>Delivery Route</b><span>{trackedLoad ? `${trackedLoad.mappedBills} stops · ${trackedRouteDistance.toFixed(1)} km total · ${trackedLoad.assignedSalesman?.name||"Unassigned"}` : "Waiting for load"}</span></div><button onClick={()=>setRoutePanelOpen(false)} aria-label="Hide delivery route"><X size={15}/></button></div>
             <div className="delivery-route-list">
               <button type="button" className="delivery-route-start" disabled={!orderedTrackedStops.length} onClick={()=>focusDeliveryStop(orderedTrackedStops[0])}><i><Navigation size={15}/></i><div><b>{orderedTrackedStops[0]?.customerName || "Start"}</b><span>{orderedTrackedStops.length ? "Route start · 0.0 km" : "Track a load to view its route"}</span></div></button>
               {orderedTrackedStops.slice(1).map((stop,index)=><button type="button" key={stop.sequence} onClick={()=>focusDeliveryStop(stop)}><i>{index+1}</i><div><b>{stop.customerName}</b><span>{stopDistance(orderedTrackedStops[index],stop).toFixed(1)} km from previous · {stop.trnSeries}{stop.trnSeries && stop.trnNo ? " " : ""}{stop.trnNo || "Delivery stop"}</span></div></button>)}
@@ -830,7 +910,7 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
             {[["Salesmen",layers.salesmen,()=>toggleLayer("salesmen")],["Routes",showRoutes,()=>setShowRoutes(value=>!value)],["Stops",layers.stops,()=>toggleLayer("stops")],["Traffic",traffic,()=>setTraffic(value=>!value)],["Geofences",layers.geofences,()=>toggleLayer("geofences")]].map(([x,on,handler])=><div key={x}><span>{x}</span><button aria-label={`Toggle ${x}`} onClick={handler} className={`switch mini ${on?"on":""}`}><i/></button></div>)}
             <hr/>
             <h4>Status Filter</h4>
-            {[["In Progress","blue"],["Delivered","green"],["Pending","orange"],["Offline","red"]].map(([status,color])=><button key={status} className={`legend-row ${statusFilter===status ? "active" : ""}`} onClick={()=>{setStatusFilter(current=>current===status?"All":status);setPage(1)}}><i className={`dot ${color}`}/>{status}<b>{loads.filter(row=>row[7]===status).length}</b></button>)}
+            {[["In Progress","blue"],["Delivered","green"],["Pending","orange"]].map(([status,color])=><button key={status} className={`legend-row ${statusFilter===status ? "active" : ""}`} onClick={()=>{setStatusFilter(current=>current===status?"All":status);setPage(1)}}><i className={`dot ${color}`}/>{status}<b>{dashboardRows.filter(row=>row[7]===status).length}</b></button>)}
           </div>}
 
           {selected && <div className="salesman-popup">
@@ -838,13 +918,13 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
             <div className="popup-status"><span>● {selected.status}</span><b>{selected.load}</b></div>
             <div className="popup-grid">
               <div><small>Delivered</small><b>{selected.done}/{selected.total}</b></div>
-              <div><small>Progress</small><b>{Math.round(selected.done/selected.total*100)}%</b></div>
+              <div><small>Progress</small><b>{selected.total?Math.round(selected.done/selected.total*100):0}%</b></div>
               <div><small>Speed</small><b>{selected.speed} km/h</b></div>
               <div><small>Battery</small><b>{selected.battery}%</b></div>
-              <div><small>Distance</small><b>22.7 km</b></div>
-              <div><small>ETA</small><b>12:45 PM</b></div>
+              <div><small>Mapped</small><b>{selected.mapped||0}/{selected.total}</b></div>
+              <div><small>Load Status</small><b>{selected.status}</b></div>
             </div>
-            <div className="popup-update"><Zap size={14}/> Last location update: 10 seconds ago</div>
+            <div className="popup-update"><Zap size={14}/> Last delivery update: {selected.lastUpdate||"Not recorded"}</div>
             <button className="primary-btn small-btn" onClick={()=>selectSalesman(selected)}><Navigation size={15}/> Center on Salesman</button>
           </div>}
         </div>
@@ -858,23 +938,23 @@ function DashboardApp({user, onLogout, onUnauthorized}) {
           </div>
           {filterOpen && <div className="filter-pop"><b>Advanced Filters</b><label>Status<select value={statusFilter} onChange={event=>{setStatusFilter(event.target.value);setPage(1)}}><option>All</option><option>In Progress</option><option>Delivered</option><option>Pending</option></select></label><label>Route<select value={routeFilter} onChange={event=>{setRouteFilter(event.target.value);setPage(1)}}><option>All Routes</option>{routeOptions.map(route=><option key={route}>{route}</option>)}</select></label><button onClick={()=>{setStatusFilter("All");setRouteFilter("All Routes");setSearch("");setPage(1)}}>Reset</button></div>}
           <div className="table-scroll"><table><thead><tr><th>Load ID</th><th>Salesman</th><th>Route</th><th>Outlets</th><th>Delivered</th><th>Pending</th><th>Progress</th><th>Status</th><th>Last Update</th><th>Actions</th></tr></thead>
-          <tbody>{pagedLoads.length ? pagedLoads.map((r)=><tr key={r[0]}><td><b>{r[0]}</b></td><td><div className="person-cell"><Avatar name={r[1]} small/><span>{r[1]}</span></div></td><td>{r[2]}</td><td>{r[3]}</td><td>{r[4]}</td><td>{r[5]}</td><td><div className="progress-cell"><span>{r[6]}%</span><div><i style={{width:`${r[6]}%`}}/></div></div></td><td><StatusPill status={r[7]}/></td><td>{r[8]}</td><td><div className="row-actions"><button aria-label={`View ${r[0]}`} onClick={()=>setDrawer(r)}><Eye size={14}/></button><button aria-label={`Locate ${r[0]}`} onClick={()=>trackLoad(r[0])}><MapIcon size={14}/></button><button disabled title="No additional load actions are implemented" aria-label={`More actions for ${r[0]}`}><MoreVertical size={14}/></button></div></td></tr>) : <tr><td className="empty-table" colSpan="10">No loads found for the selected filters.</td></tr>}</tbody></table></div>
+          <tbody>{pagedLoads.length ? pagedLoads.map((r)=><tr key={r[9].id}><td><b>{r[0]}</b></td><td><div className="person-cell"><Avatar name={r[1]} small/><span>{r[1]}</span></div></td><td>{r[2]}</td><td>{r[3]}</td><td>{r[4]}</td><td>{r[5]}</td><td><div className="progress-cell"><span>{r[6]}%</span><div><i style={{width:`${r[6]}%`}}/></div></div></td><td><StatusPill status={r[7]}/></td><td>{r[8]}</td><td><div className="row-actions"><button aria-label={`View ${r[0]}`} onClick={()=>setDrawer(r)}><Eye size={14}/></button><button aria-label={`Locate ${r[0]}`} onClick={()=>trackLoad(r)}><MapIcon size={14}/></button><button disabled title="No additional load actions are implemented" aria-label={`More actions for ${r[0]}`}><MoreVertical size={14}/></button></div></td></tr>) : <tr><td className="empty-table" colSpan="10">No loads found for the selected filters.</td></tr>}</tbody></table></div>
           <div className="pagination"><span>{filteredLoads.length ? `Showing ${(currentPage-1)*pageSize+1} to ${Math.min(currentPage*pageSize,filteredLoads.length)} of ${filteredLoads.length} loads` : "Showing 0 loads"}</span><div><button disabled={currentPage===1} onClick={()=>setPage(value=>Math.max(1,value-1))}>‹</button>{Array.from({length:totalPages},(_,index)=>index+1).map(pageNumber=><button key={pageNumber} className={currentPage===pageNumber?"current":""} onClick={()=>setPage(pageNumber)}>{pageNumber}</button>)}<button disabled={currentPage===totalPages} onClick={()=>setPage(value=>Math.min(totalPages,value+1))}>›</button></div></div>
         </div>
 
         <div className="completed-card">
-          <div className="section-head"><h2>Recently Completed</h2><span className="text-btn">All {completed.length}</span></div>
-          <div>{completed.map(x=><div className="completed-row" key={x[0]}><div className="complete-icon"><Check size={13}/></div><div><b>{x[0]}</b><span>{x[1]}</span></div><div className="complete-time"><b>{x[3]}</b><span>{x[2]}</span></div></div>)}</div>
+          <div className="section-head"><h2>Recently Completed</h2><span className="text-btn">{deliverySummary.completedLoads} total</span></div>
+          <div>{recentlyCompleted.length?recentlyCompleted.map(load=>{const when=loadDate(load.uploadedAt);return <div className="completed-row" key={load.id}><div className="complete-icon"><Check size={13}/></div><div><b>{load.assignedSalesman?.name||"Unassigned"}</b><span>{deliveryLabel(load)}</span></div><div className="complete-time"><b>{when.time}</b><span>{load.totalBills} bills</span></div></div>}):<div className="empty-table">No completed loads found.</div>}</div>
         </div>
 
         <div className="performance-card">
           <div className="section-head"><h2>Performance Overview</h2><span className="select-btn compact">Last 7 Days</span></div>
           <div className="chart-top">
-            <div className="donut"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pie} dataKey="value" innerRadius={43} outerRadius={58} paddingAngle={1} startAngle={90} endAngle={-270}>{pie.map(x=><Cell key={x.name} fill={x.color}/>)}</Pie></PieChart></ResponsiveContainer><div className="donut-center"><b>70%</b><span>Success Rate</span></div></div>
-            <div className="chart-legend">{pie.map(x=><div key={x.name}><i style={{background:x.color}}/><span>{x.name}</span><b>{x.value} <small>({x.name==="Delivered"?"58.3":x.name==="In Progress"?"66.7":x.name==="Pending"?"33.3":"4.2"}%)</small></b></div>)}</div>
+            <div className="donut"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={statusPie} dataKey="value" innerRadius={43} outerRadius={58} paddingAngle={1} startAngle={90} endAngle={-270}>{statusPie.map(x=><Cell key={x.name} fill={x.color}/>)}</Pie></PieChart></ResponsiveContainer><div className="donut-center"><b>{loadPercent(deliverySummary.completedLoads)}</b><span>Success Rate</span></div></div>
+            <div className="chart-legend">{statusPie.map(x=><div key={x.name}><i style={{background:x.color}}/><span>{x.name}</span><b>{x.value} <small>({loadPercent(x.value)})</small></b></div>)}</div>
           </div>
           <h3 className="subchart-title">Deliveries Over Time</h3>
-          <div className="line-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={performance}><XAxis dataKey="day" tick={{fontSize:9}} axisLine={false} tickLine={false}/><YAxis hide/><Tooltip contentStyle={{borderRadius:10,border:"1px solid #e8eaf1",fontSize:11}}/><Line type="monotone" dataKey="delivered" stroke="#20a862" strokeWidth={2} dot={{r:2}}/><Line type="monotone" dataKey="progress" stroke="#2777e8" strokeWidth={2} dot={{r:2}}/></LineChart></ResponsiveContainer></div>
+          <div className="line-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={actualPerformance}><XAxis dataKey="day" tick={{fontSize:9}} axisLine={false} tickLine={false}/><YAxis hide/><Tooltip contentStyle={{borderRadius:10,border:"1px solid #e8eaf1",fontSize:11}}/><Line type="monotone" dataKey="delivered" stroke="#20a862" strokeWidth={2} dot={{r:2}}/><Line type="monotone" dataKey="progress" stroke="#2777e8" strokeWidth={2} dot={{r:2}}/></LineChart></ResponsiveContainer></div>
           <div className="line-legend"><span><i className="green"/>Delivered</span><span><i className="blue"/>In Progress</span></div>
         </div>
       </section>}
